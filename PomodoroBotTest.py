@@ -71,6 +71,7 @@ def finish_pomo(member, pomo_data):
 
 
 async def pomo_logic(member, pomo_data):
+    """mail logic for the bot wohhoo"""
     channel = bot.get_channel(1041715750047596574) #unified channel to send notifs
     if pomo_check(member.id):
         print(pomo_data)
@@ -82,8 +83,13 @@ async def pomo_logic(member, pomo_data):
                 run_date=datetime.utcnow() + timedelta(seconds=pomo_data["Pomo_time"]),
                 args=[member, pomo_data]
             )
+        
+        
 
 def pomo_check(member_id):
+    """Flag to check if the person is still in VC
+       returns: Boolean
+    """
     print("pomo_data",pomo_data)
     print("VCLIST",VC_LIST)
     print("memberID",member_id)
@@ -94,6 +100,9 @@ def pomo_check(member_id):
 
 @bot.event #VC events #leaving or joining a VC alert
 async def on_voice_state_update(member, before, after):
+    """Logic for if the person has left or joined the VC
+        Supports:  pomo_check
+        Updates: VC_LIST to have the IDs of the people in the workspace VC """
 
     joined_voice_channel = None
     if before.channel is None and after.channel is not None:
