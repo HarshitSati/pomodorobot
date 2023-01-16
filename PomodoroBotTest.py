@@ -33,8 +33,11 @@ async def hello_num(interaction: discord.Interaction, num: int):
 
 pomo_data={}
 complete_pomo={}
+notif_channel = bot.get_channel(1041715750047596574) #unified channel to send notifs
+
 
 scheduler = AsyncIOScheduler(timezone=utc)
+scheduler.start()
 
 @bot.slash_command(guild_ids=[1022156035823251536])
 @discord.option("pomo_time", description="Time of each pomodoro (in mins); default is 25mins")
@@ -57,9 +60,11 @@ async def pomo(interaction: discord.Interaction, pomo_time:int=25, number_of_pom
     elapsed_time=0
     number_of_breaks= number_of_pomos-1
     total_time= pomo_time*number_of_pomos+break_time*number_of_breaks
+    total_pomo_time= number_of_pomos*pomo_time
 
-    pomo_data[member.id] = {"Pomo_time": pomo_time, "Number_of_pomos":number_of_pomos,
-                          "Breat_time":break_time, "Total_time":total_time,'Elapsed_time': elapsed_time, 'pomo_active': False}
+    pomo_data[member.id] = {"pomo_time": pomo_time, "number_of_pomos":number_of_pomos, "number_of_breaks": number_of_breaks,
+                          "break_time":break_time, "total_pomo_time": total_pomo_time, "total_time":total_time,
+                          'elapsed_time': elapsed_time, 'pomo_active': False, 'job': None, 'run_time': None, 'breaks_left': number_of_breaks, "break_status": False}
     
 
     await interaction.response.send_message("Join the VC to start the pomo!!")
@@ -68,21 +73,70 @@ async def pomo(interaction: discord.Interaction, pomo_time:int=25, number_of_pom
 
 def finish_pomo(member, pomo_data):
     print(f"Finished pomo for member {member}")
+    print(f"Your total pomo time is {pomo_data['total_pomo_time']}")
 
+# If user in VC, reschedules and starts job immediately
+# else, sets variable in pomo_data to True, which is checked in pomo_logic next time user joins VC
+# which then calls reschedule_job again
+def reschedule_job(pomo_data,time_paused):
+    print("Job rescheduled")
+    current_time = datetime.utcnow()
+    break_time = current_time - time_paused
+    previous_run_time = pomo_data['run_time']
+    new_run_time = previous_run_time+break_time
+    pomo_data['run_time'] = new_run_time
+    pomo_data['job'].reschedule("date", run_date = pomo_data['run_time'])
+    pomo_data['breaks_left'] -= 1 
+    print(f"main job: {pomo_data['job']}")
+    create_secondary_task(pomo_data)
+
+    
+def create_break_job(pomo_data):
+    print("Break job created")
+    pomo_data['job'].pause()
+    time_paused = datetime.utcnow()
+    break_job = scheduler.add_job(reschedule_job, "date", 
+                run_date = datetime.utcnow()+timedelta(seconds=pomo_data['break_time']), args=[pomo_data, time_paused])
+    
+    print(f"break job {break_job}")
+
+
+@bot.slash_command(guild_ids=[1022156035823251536])
+@discord.option("status", description="Shows the status of all current jobs")
+async def task_status(interaction: discord.Interaction):
+    """Checks status of all jobs!"""
+    for job in scheduler.get_jobs():
+        print(job)
+
+
+
+# Creates secondary task that runs for the time of one pomo, when complete, calls a function that pauses the task
+# and creates a new task that lasts for the time period of one break_time, as long as there is more than one break left.
+def create_secondary_task(pomo_data):
+    if pomo_data['breaks_left'] > 0:
+        print("Secondary task created")
+        secondary_task = scheduler.add_job(create_break_job, "date", run_date= datetime.utcnow()+
+                          timedelta(seconds=pomo_data['pomo_time']), args=[pomo_data])
+
+        print(f"secondary task: {secondary_task}")
+        # create task
 
 async def pomo_logic(member, pomo_data):
     """mail logic for the bot wohhoo"""
-    channel = bot.get_channel(1041715750047596574) #unified channel to send notifs
     if pomo_check(member.id):
         print(pomo_data)
         if not pomo_data['pomo_active']:
             pomo_data['pomo_active'] = True
-            await channel.send("Pomodoro started! :)")
-            scheduler.add_job(
+            await notif_channel.send("Pomodoro started! :)")
+            pomo_data['run_time'] = datetime.utcnow() + timedelta(seconds=pomo_data["total_pomo_time"])
+            pomo_data['job'] = scheduler.add_job(
                 finish_pomo, "date",
-                run_date=datetime.utcnow() + timedelta(seconds=pomo_data["Pomo_time"]),
+                run_date=pomo_data['run_time'],
                 args=[member, pomo_data]
             )
+            create_secondary_task(pomo_data)
+
+            
         
         
 
@@ -90,9 +144,6 @@ def pomo_check(member_id):
     """Flag to check if the person is still in VC
        returns: Boolean
     """
-    print("pomo_data",pomo_data)
-    print("VCLIST",VC_LIST)
-    print("memberID",member_id)
     if member_id in pomo_data and member_id in VC_LIST: # Check if user currently in VC
         return True
     return False
@@ -124,7 +175,6 @@ async def on_voice_state_update(member, before, after):
     if member.id in pomo_data:
         await pomo_logic(member, pomo_data[member.id])
     
-    print(VC_LIST)
 
 
 with open("token", "r", encoding="utf-8") as tf:

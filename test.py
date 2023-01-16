@@ -18,27 +18,57 @@ async def on_ready():
     print("------")
 
 
+def start_job():
+    run_time = datetime.utcnow() + timedelta(seconds=30)
+
+    job = scheduler.add_job(
+    test_func, "date",
+    run_date=run_time)
+
+    pomo_data['run_time'] = run_time
+
+    return job
+
+def reschedule_job(job, time_paused, previous_run_time):
+    current_time = datetime.utcnow()
+
+    break_time = current_time - time_paused
+
+    new_run_time = previous_run_time + break_time
+
+    pomo_data['run_time'] = new_run_time
+
+    job.reschedule("date", run_date = new_run_time)
+
+    print("job resumed")
+
+
+def create_break_job(job, break_time):
+    job.pause()
+
+    time_paused = datetime.utcnow()
+
+    break_job = scheduler.add_job(reschedule_job, "date", run_date = datetime.utcnow() + timedelta(seconds=break_time), args=[job, time_paused, pomo_data['run_time']])
+
+
+
+
+
 def test_func():
     global job
     print('hi')
 
-    job = scheduler.add_job(
-    test_func, "date",
-    run_date=datetime.utcnow() + timedelta(seconds=30))
+    job = start_job()
 
 
 scheduler = AsyncIOScheduler(timezone=utc)
 scheduler.start()
 
 
-job = scheduler.add_job(
-    test_func, "date",
-    run_date=datetime.utcnow() + timedelta(seconds=30)
-)
-
 pomo_data = {"Pomo_time": 25, "Number_of_pomos":2,
-             "break_time":5, "Total_time":50,'Elapsed_time': 0, 'pomo_active': False, 'time_paused': None}
+             "break_time":5, "Total_time":50,'Elapsed_time': 0, 'pomo_active': False, 'time_paused': None, 'run_time': None}
 
+job = start_job()
 
 choice_dict = {'Pause': 0, 'Resume': 1, 'Check': -1}
 
@@ -51,19 +81,13 @@ async def task_status(interaction: discord.Interaction, status: str = 'Check'): 
 
     if status != -1:
         if status:
-            current_time = datetime.utcnow()
-
-            break_time = current_time - pomo_data['time_paused']
-            previous_next_run_time = job.next_run_time
-            job.modify(next_run_time = previous_next_run_time + break_time)
+            pomo_data['run_time'] = reschedule_job(job)
 
             job.resume()
         else:
-            job.pause()
-
-            pomo_data['time_paused'] = datetime.utcnow()
+            create_break_job(job, 10)
     
-    print(f"job: {job.trigger[0]}")
+    print(f"job: {job}")
 
 
 with open("token", "r", encoding="utf-8") as tf:
